@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Big incontri",
+  "description": "App condivisa per Samuel e Ilenia per ricordare e segnare tutti i loro bellissimi incontri, calcolare il tempo trascorso, condividere foto e note dedicate, e tenere traccia delle date speciali e anniversari in un\u0027elegante interfaccia azzurra.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

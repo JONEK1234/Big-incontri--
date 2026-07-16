@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "Encounter": {
+      "title": "Encounter",
+      "description": "Represents an encounter between Samuel and Ilenia",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "title": { "type": "string" },
+        "note": { "type": "string" },
+        "photos": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stickers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "title", "createdAt"]
+    },
+    "SpecialDate": {
+      "title": "SpecialDate",
+      "description": "A special anniversary or calendar milestone to celebrate",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["anniversary", "special_date", "milestone"]
+        }
+      },
+      "required": ["date", "title", "type"]
+    },
+    "LoveMessage": {
+      "title": "LoveMessage",
+      "description": "A sweet note or message shared on the board",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sender": { "type": "string", "enum": ["Samuel", "Ile"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sender", "text", "timestamp"]
+    },
+    "Sticker": {
+      "title": "Sticker",
+      "description": "A customized keepsake sticker or photo memory linked to encounters",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "uploadedBy": { "type": "string", "enum": ["Samuel", "Ile"] },
+        "associatedMeetingIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["url", "uploadedBy", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/meetings/{meetingId}": {
+      "schema": "Encounter",
+      "description": "Meetings and encounters log"
+    },
+    "/special_dates/{specialDateId}": {
+      "schema": "SpecialDate",
+      "description": "Anniversaries and special dates list"
+    },
+    "/love_messages/{messageId}": {
+      "schema": "LoveMessage",
+      "description": "Interactive live messages sticky board"
+    },
+    "/stickers/{stickerId}": {
+      "schema": "Sticker",
+      "description": "Customized keepsake sticker collection"
+    }
+  }
+}

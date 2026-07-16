@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Default-deny catch-all safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global path and ID validation helpers
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    // 3. Schema & Type validation helper functions
+    function isValidEncounter(data) {
+      return data.date is string && data.date.size() <= 32
+        && data.title is string && data.title.size() <= 200
+        && (!('note' in data) || (data.note is string && data.note.size() <= 5000))
+        && (!('noteSamuel' in data) || (data.noteSamuel is string && data.noteSamuel.size() <= 5000))
+        && (!('noteIle' in data) || (data.noteIle is string && data.noteIle.size() <= 5000))
+        && (!('photos' in data) || (data.photos is list && data.photos.size() <= 100))
+        && (!('photosWithAuthor' in data) || (data.photosWithAuthor is list && data.photosWithAuthor.size() <= 100))
+        && (!('stickers' in data) || (data.stickers is list && data.stickers.size() <= 100))
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidSpecialDate(data) {
+      return data.date is string && data.date.size() <= 32
+        && data.title is string && data.title.size() <= 200
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
+        && data.type is string && (data.type == 'anniversary' || data.type == 'special_date' || data.type == 'milestone');
+    }
+
+    function isValidLoveMessage(data) {
+      return data.sender is string && (data.sender == 'Samuel' || data.sender == 'Ile' || data.sender == 'Ilenia')
+        && data.text is string && data.text.size() <= 2000
+        && data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    function isValidSticker(data) {
+      return data.url is string && data.url.size() <= 10000000
+        && (!('title' in data) || (data.title is string && data.title.size() <= 200))
+        && data.uploadedBy is string && (data.uploadedBy == 'Samuel' || data.uploadedBy == 'Ile' || data.uploadedBy == 'Ilenia')
+        && (!('associatedMeetingIds' in data) || (data.associatedMeetingIds is list && data.associatedMeetingIds.size() <= 100))
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    // 4. Match blocks for collections
+    match /meetings/{meetingId} {
+      allow read: if true;
+      allow create: if isValidId(meetingId) && isValidEncounter(incoming());
+      allow update: if isValidId(meetingId) && isValidEncounter(incoming());
+      allow delete: if isValidId(meetingId);
+    }
+
+    match /special_dates/{specialDateId} {
+      allow read: if true;
+      allow create: if isValidId(specialDateId) && isValidSpecialDate(incoming());
+      allow update: if isValidId(specialDateId) && isValidSpecialDate(incoming());
+      allow delete: if isValidId(specialDateId);
+    }
+
+    match /love_messages/{messageId} {
+      allow read: if true;
+      allow create: if isValidId(messageId) && isValidLoveMessage(incoming());
+      allow update: if isValidId(messageId) && isValidLoveMessage(incoming());
+      allow delete: if isValidId(messageId);
+    }
+
+    match /stickers/{stickerId} {
+      allow read: if true;
+      allow create: if isValidId(stickerId) && isValidSticker(incoming());
+      allow update: if isValidId(stickerId) && isValidSticker(incoming());
+      allow delete: if isValidId(stickerId);
+    }
+  }
+}
