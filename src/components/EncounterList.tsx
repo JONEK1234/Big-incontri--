@@ -18,7 +18,7 @@ interface EncounterListProps {
 }
 
 export default function EncounterList({ encounters, stickers = [], onDelete, onEdit, currentUser }: EncounterListProps) {
-  const [lightboxPhotos, setLightboxPhotos] = useState<{ url: string; uploadedBy: string; encounter?: Encounter }[]>([]);
+  const [lightboxPhotos, setLightboxPhotos] = useState<{ url: string; uploadedBy: string; encounter?: Encounter; isSticker?: boolean; title?: string }[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [touchEndX, setTouchEndX] = useState<number | null>(null);
@@ -592,7 +592,10 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 pointer-events-none text-center flex flex-col items-center gap-2">
               <div className="bg-neutral-900/90 backdrop-blur-md border border-white/10 px-4 py-2.5 rounded-2xl flex flex-col items-center gap-1 shadow-2xl max-w-[90vw] pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                 <p className="text-white text-xs font-extrabold tracking-wide">
-                  Immagine ricordo {lightboxPhotos.length > 1 && `(${lightboxIndex + 1}/${lightboxPhotos.length})`}
+                  {lightboxPhotos[lightboxIndex].isSticker
+                    ? (lightboxPhotos[lightboxIndex].title || "Adesivo ricordo")
+                    : "Immagine ricordo"}{" "}
+                  {lightboxPhotos.length > 1 && `(${lightboxIndex + 1}/${lightboxPhotos.length})`}
                 </p>
                 <div className="flex items-center gap-1.5 text-[10px] text-white/60 font-medium">
                   <span className={lightboxPhotos[lightboxIndex].uploadedBy === "Samuel" ? "text-sky-300" : "text-rose-300"}>
@@ -720,6 +723,7 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
                         <div className="flex gap-2 overflow-x-auto py-1 scrollbar-none snap-x">
                           {encounters.map((enc) => {
                             const isSelected = uploadStickerMeetingIds.includes(enc.id);
+                            const meta = encounterMeta.get(enc.id);
                             return (
                               <button
                                 type="button"
@@ -738,7 +742,7 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
                                 }`}
                               >
                                 <Calendar className="w-3 h-3" />
-                                <span>{enc.date.split("-").reverse().join("/")} - {enc.title}</span>
+                                <span>{meta ? `${meta.index}° - ` : ""}{enc.date.split("-").reverse().join("/")} - {enc.title}</span>
                               </button>
                             );
                           })}
@@ -888,8 +892,36 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
                         >
                           {/* Image box */}
                           <div 
-                            onClick={() => setSelectedDetailSticker(isSelected ? null : st)}
-                            className="aspect-square w-full rounded-xl overflow-hidden bg-slate-50 relative cursor-pointer"
+                            onClick={() => {
+                              // Open this sticker (or all filtered stickers) in the lightbox!
+                              const stickerPhotos = sortedStickers.map(s => {
+                                const associatedMeetings = s.associatedMeetingIds
+                                  ?.map(mId => encounters.find(e => e.id === mId))
+                                  .filter((e): e is Encounter => !!e) || [];
+                                
+                                let lightboxTitle = "";
+                                if (associatedMeetings.length > 0) {
+                                  const enc = associatedMeetings[0];
+                                  const meta = encounterMeta.get(enc.id);
+                                  const encIndex = meta ? `${meta.index}° incontro` : "";
+                                  const encDate = enc.date.split("-").reverse().join("/");
+                                  lightboxTitle = `Adesivo - ${encIndex ? encIndex + " - " : ""}${encDate}`;
+                                } else {
+                                  lightboxTitle = `Adesivo: ${s.title || "Adesivo ricordo"}`;
+                                }
+
+                                return {
+                                  url: s.url,
+                                  uploadedBy: s.uploadedBy,
+                                  isSticker: true,
+                                  title: lightboxTitle
+                                };
+                              });
+                              const stickerIdx = sortedStickers.findIndex(s => s.id === st.id);
+                              setLightboxPhotos(stickerPhotos);
+                              setLightboxIndex(stickerIdx !== -1 ? stickerIdx : 0);
+                            }}
+                            className="aspect-square w-full rounded-xl overflow-hidden bg-slate-50 relative cursor-pointer group"
                           >
                             <img
                               src={st.url}
@@ -902,6 +934,11 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
                             }`}>
                               {st.uploadedBy === "Samuel" ? "Samuel" : "Ilenia"}
                             </span>
+
+                            {/* View fullscreen overlay */}
+                            <div className="absolute inset-0 bg-black/25 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-200">
+                              <Eye className="w-5 h-5 text-white drop-shadow-md" />
+                            </div>
                           </div>
 
                           {/* Info section */}
@@ -914,17 +951,49 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
                                 st.associatedMeetingIds.map((mId) => {
                                   const enc = encounters.find((e) => e.id === mId);
                                   if (!enc) return null;
+                                  const meta = encounterMeta.get(enc.id);
+                                  
+                                  // Find if this sticker st is the first sticker in sortedStickers for this meeting
+                                  const isFirstForMeeting = sortedStickers.find(s => 
+                                    s.associatedMeetingIds && s.associatedMeetingIds.includes(mId)
+                                  )?.id === st.id;
+
                                   return (
-                                    <div key={mId} className="flex items-start gap-1 text-[8px] font-bold text-amber-800 bg-amber-50/70 border border-amber-100/60 p-1 rounded-md">
-                                      <Calendar className="w-2.5 h-2.5 text-amber-600 shrink-0 mt-0.5" />
-                                      <div className="truncate min-w-0">
-                                        <span className="font-mono">{enc.date.split("-").reverse().join("/")}</span>: {enc.title}
+                                    <button
+                                      type="button"
+                                      key={mId}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const el = document.getElementById(`encounter-card-${enc.id}`);
+                                        if (el) {
+                                          setIsStickerGalleryOpen(false);
+                                          setTimeout(() => {
+                                            el.scrollIntoView({ behavior: "smooth", block: "center" });
+                                            el.classList.add("ring-4", "ring-brand-200", "scale-[1.01]");
+                                            setTimeout(() => {
+                                              el.classList.remove("ring-4", "ring-brand-200", "scale-[1.01]");
+                                            }, 1500);
+                                          }, 300);
+                                        }
+                                      }}
+                                      className="w-full text-left flex items-start gap-1 p-1.5 bg-amber-50 hover:bg-amber-100/80 border border-amber-200/50 rounded-xl text-[9px] font-bold text-amber-900 transition active:scale-[0.98] cursor-pointer shadow-2xs"
+                                      title="Clicca per andare al ricordo"
+                                    >
+                                      <Calendar className="w-3 h-3 text-amber-600 shrink-0 mt-0.5" />
+                                      <div className="leading-normal break-words">
+                                        {isFirstForMeeting ? (
+                                          <>
+                                            <span className="font-extrabold">{meta ? `${meta.index}° - ` : ""}{enc.date.split("-").reverse().join("/")}</span>: {enc.title}
+                                          </>
+                                        ) : (
+                                          <span className="font-extrabold">{meta ? `${meta.index}° - ` : ""}{enc.date.split("-").reverse().join("/")}</span>
+                                        )}
                                       </div>
-                                    </div>
+                                    </button>
                                   );
                                 })
                               ) : (
-                                <div className="text-[8px] font-bold text-neutral-400 bg-neutral-50 border border-neutral-100 p-1 rounded-md flex items-center gap-0.5">
+                                <div className="text-[8px] font-bold text-neutral-400 bg-neutral-50 border border-neutral-100 p-1.5 rounded-xl flex items-center gap-0.5">
                                   <span>📌 Ricordo Generale</span>
                                 </div>
                               )}
@@ -1037,7 +1106,10 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-extrabold truncate">{enc.title}</p>
                           <p className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider mt-0.5">
-                            {enc.date.split("-").reverse().join("/")}
+                            {(() => {
+                              const meta = encounterMeta.get(enc.id);
+                              return meta ? `${meta.index}° Incontro - ` : "";
+                            })()}{enc.date.split("-").reverse().join("/")}
                           </p>
                         </div>
                       </label>
