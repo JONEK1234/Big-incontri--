@@ -289,6 +289,42 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
         <ChevronRight className="w-5 h-5 text-amber-600" />
       </div>
 
+      {/* Quick Access Scrollbar */}
+      {encounters.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1 text-brand-600">
+            <span className="text-[10px] font-black uppercase tracking-wider">Vai subito a un incontro 📍</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto py-1.5 scrollbar-none snap-x">
+            {sortedRecent.map((enc) => {
+              const meta = encounterMeta.get(enc.id);
+              return (
+                <button
+                  type="button"
+                  key={`quick-nav-${enc.id}`}
+                  onClick={() => {
+                    const el = document.getElementById(`encounter-card-${enc.id}`);
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                      el.classList.add("ring-4", "ring-brand-200", "scale-[1.01]");
+                      setTimeout(() => {
+                        el.classList.remove("ring-4", "ring-brand-200", "scale-[1.01]");
+                      }, 1500);
+                    }
+                  }}
+                  className="flex-shrink-0 snap-center px-3 py-1.5 rounded-xl border border-brand-100 bg-white text-slate-900 font-bold text-[10px] hover:bg-brand-50/50 hover:border-brand-200 transition flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-xs"
+                >
+                  <Heart className="w-3 h-3 text-brand-500 fill-brand-200 shrink-0" />
+                  <span className="truncate max-w-[130px]">
+                    {meta?.index}° - {enc.title}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Main List */}
       <div className="space-y-5">
         {sortedRecent.map((encounter) => {
