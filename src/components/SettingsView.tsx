@@ -1,13 +1,14 @@
 import React from "react";
-import { Encounter, Sticker } from "../types";
-import { HardDrive, AlertTriangle, CheckCircle2, ShieldCheck, Database, FileImage, Layers } from "lucide-react";
+import { Encounter, Sticker, LookbookItem } from "../types";
+import { HardDrive, AlertTriangle, CheckCircle2, ShieldCheck, Database, FileImage, Layers, Shirt, MapPin, Sparkles } from "lucide-react";
 
 interface SettingsViewProps {
   encounters: Encounter[];
   stickers: Sticker[];
+  lookbookItems?: LookbookItem[];
 }
 
-export default function SettingsView({ encounters, stickers }: SettingsViewProps) {
+export default function SettingsView({ encounters, stickers, lookbookItems = [] }: SettingsViewProps) {
   // 1 MB in bytes
   const FIRESTORE_LIMIT_BYTES = 1048576; 
 
@@ -77,8 +78,22 @@ export default function SettingsView({ encounters, stickers }: SettingsViewProps
     else urlCount++;
   });
 
+  // Calculate Lookbook (Look & Place) sizes
+  let lookbookSizeBytes = 0;
+  lookbookItems.forEach((item) => {
+    const bytes = getByteSize(item.url);
+    lookbookSizeBytes += bytes;
+    if (item.url.startsWith("data:")) base64Count++;
+    else urlCount++;
+  });
+
+  const samuLooksCount = lookbookItems.filter((i) => i.category === "samu_look").length;
+  const ileLooksCount = lookbookItems.filter((i) => i.category === "ile_look").length;
+  const placesCount = lookbookItems.filter((i) => i.category === "place").length;
+  const totalLookbookCount = lookbookItems.length;
+
   // Total space occupied in the database
-  const grandTotalBytes = totalDatabaseBytes + stickersSizeBytes;
+  const grandTotalBytes = totalDatabaseBytes + stickersSizeBytes + lookbookSizeBytes;
   const totalStickersCount = stickers.length;
 
   // Format bytes helper
@@ -187,6 +202,18 @@ export default function SettingsView({ encounters, stickers }: SettingsViewProps
               Adesivi personalizzati
             </span>
             <span className="font-bold">{totalStickersCount} adesivi ({formatBytes(stickersSizeBytes)})</span>
+          </div>
+          <div className="flex justify-between items-center text-xs text-brand-800 py-1 border-b border-brand-50">
+            <span className="flex items-center gap-1.5 font-medium">
+              <Shirt className="w-3.5 h-3.5 text-amber-500" />
+              Immagini Look & Place
+            </span>
+            <div className="text-right">
+              <span className="font-bold">{totalLookbookCount} immagini ({formatBytes(lookbookSizeBytes)})</span>
+              <p className="text-[10px] text-brand-400 font-medium">
+                {samuLooksCount} Samu • {ileLooksCount} Ile • {placesCount} Posti
+              </p>
+            </div>
           </div>
           <div className="flex justify-between items-center text-xs text-brand-800 py-1 border-b border-brand-50">
             <span className="flex items-center gap-1.5 font-medium">

@@ -36,6 +36,15 @@ interface PreviewFile {
   url: string;
 }
 
+const hasValidTitle = (title?: string) => {
+  if (!title) return false;
+  const trimmed = title.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (lower === "senza titolo" || lower === "foto senza titolo") return false;
+  return true;
+};
+
 export default function LookbookView({
   lookbookItems,
   currentUser,
@@ -582,16 +591,12 @@ export default function LookbookView({
 
               {/* Info & Action Controls */}
               <div className="p-3 flex-1 flex flex-col justify-between gap-1.5 bg-white">
-                {item.title ? (
+                {hasValidTitle(item.title) && (
                   <p
                     className="text-[11px] font-extrabold text-brand-950 truncate"
                     title={item.title}
                   >
                     {item.title}
-                  </p>
-                ) : (
-                  <p className="text-[10px] font-bold text-brand-400 italic">
-                    Senza titolo
                   </p>
                 )}
 
@@ -760,9 +765,11 @@ export default function LookbookView({
               onClick={(e) => e.stopPropagation()}
             >
               <div>
-                <p className="text-white text-sm font-black">
-                  {filteredItems[lightboxIndex].title || "Foto senza titolo"}
-                </p>
+                {hasValidTitle(filteredItems[lightboxIndex].title) && (
+                  <p className="text-white text-sm font-black">
+                    {filteredItems[lightboxIndex].title}
+                  </p>
+                )}
                 <p className="text-[10px] text-white/70 font-medium mt-0.5">
                   Caricato da {filteredItems[lightboxIndex].uploadedBy}
                 </p>

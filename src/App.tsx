@@ -345,7 +345,7 @@ export default function App() {
           />
         );
       case "settings":
-        return <SettingsView encounters={encounters} stickers={stickers} />;
+        return <SettingsView encounters={encounters} stickers={stickers} lookbookItems={lookbookItems} />;
       default:
         return null;
     }
