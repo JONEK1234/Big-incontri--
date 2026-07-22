@@ -1,5 +1,5 @@
 import React from "react";
-import { History, Calendar, Heart, Image, PlusCircle, Settings } from "lucide-react";
+import { History, Calendar, Heart, Image, PlusCircle, Settings, Shirt } from "lucide-react";
 
 interface BottomNavProps {
   activeTab: string;
@@ -11,6 +11,7 @@ export default function BottomNav({ activeTab, setActiveTab, onOpenAddModal }: B
   const tabs = [
     { id: "incontri", label: "Incontri", icon: History },
     { id: "gallery", label: "Galleria", icon: Image },
+    { id: "lookbook", label: "Look & Posti", icon: Shirt },
     { id: "add", label: "Nuovo", icon: PlusCircle, isMiddle: true },
     { id: "calendar", label: "Date", icon: Calendar },
     { id: "board", label: "Bacheca", icon: Heart },

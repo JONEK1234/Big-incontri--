@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Encounter, Sticker } from "../types";
+import { Encounter, Sticker, LookbookItem } from "../types";
 import { calculateDaysBetween, formatDuration } from "../utils/imageCompressor";
-import { Calendar, Trash2, Edit2, Heart, MessageSquare, ChevronLeft, ChevronRight, Image as ImageIcon, Eye, Sparkles, X, Smile, Plus, Upload, Link2, ExternalLink, Settings } from "lucide-react";
+import { Calendar, Trash2, Edit2, Heart, MessageSquare, ChevronLeft, ChevronRight, Image as ImageIcon, Eye, Sparkles, X, Smile, Plus, Upload, Link2, ExternalLink, Settings, Shirt } from "lucide-react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, updateDoc, addDoc, deleteDoc, collection } from "firebase/firestore";
 import { compressImage } from "../utils/imageCompressor";
@@ -12,12 +12,22 @@ import PhotoActionModal from "./PhotoActionModal";
 interface EncounterListProps {
   encounters: Encounter[];
   stickers?: Sticker[];
+  lookbookItems?: LookbookItem[];
   onDelete: (id: string) => Promise<void>;
   onEdit: (encounter: Encounter) => void;
   currentUser: string;
+  onNavigateToLookbook?: () => void;
 }
 
-export default function EncounterList({ encounters, stickers = [], onDelete, onEdit, currentUser }: EncounterListProps) {
+export default function EncounterList({
+  encounters,
+  stickers = [],
+  lookbookItems = [],
+  onDelete,
+  onEdit,
+  currentUser,
+  onNavigateToLookbook,
+}: EncounterListProps) {
   const [lightboxPhotos, setLightboxPhotos] = useState<{ url: string; uploadedBy: string; encounter?: Encounter; isSticker?: boolean; title?: string }[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
@@ -665,8 +675,33 @@ export default function EncounterList({ encounters, stickers = [], onDelete, onE
             </div>
 
             {/* Scrollable container for Upload and Sticker Grid */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
               
+              {/* LOOKBOOK (SAMU LOOK, ILE LOOK, PLACE) BUTTON */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsStickerGalleryOpen(false);
+                  onNavigateToLookbook?.();
+                }}
+                className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white p-3.5 rounded-2xl flex items-center justify-between shadow-md hover:shadow-lg transition duration-200 active:scale-[0.99] cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center text-white shadow-xs">
+                    <Shirt className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <h4 className="text-xs font-black font-display tracking-tight uppercase">
+                      Look & Posti 📸
+                    </h4>
+                    <p className="text-[9px] text-white/80 font-bold uppercase tracking-wider">
+                      Samu look • Ile look • Place ({lookbookItems.length})
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-white/90" />
+              </button>
+
               {/* UPLOADER CARD TRIGGER OR EXPANDED */}
               {!isUploaderExpanded ? (
                 <button

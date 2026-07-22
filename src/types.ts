@@ -40,3 +40,12 @@ export interface Sticker {
   createdAt: string;
 }
 
+export interface LookbookItem {
+  id: string;
+  category: "samu_look" | "ile_look" | "place";
+  url: string;
+  title?: string;
+  uploadedBy: string; // "Samuel" | "Ilenia"
+  createdAt: string;
+}
+

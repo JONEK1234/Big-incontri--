@@ -11,7 +11,7 @@ import {
   getDocs,
   updateDoc,
 } from "firebase/firestore";
-import { Encounter, SpecialDate, LoveMessage, EncounterPhoto, Sticker } from "./types";
+import { Encounter, SpecialDate, LoveMessage, EncounterPhoto, Sticker, LookbookItem } from "./types";
 import BottomNav from "./components/BottomNav";
 import UserSelector from "./components/UserSelector";
 import EncounterList from "./components/EncounterList";
@@ -19,6 +19,7 @@ import AddEncounterModal from "./components/AddEncounterModal";
 import CalendarView from "./components/CalendarView";
 import LoveBoard from "./components/LoveBoard";
 import PhotoGallery from "./components/PhotoGallery";
+import LookbookView from "./components/LookbookView";
 import SettingsView from "./components/SettingsView";
 import { Heart, Sparkles, AlertCircle } from "lucide-react";
 
@@ -38,6 +39,7 @@ export default function App() {
 
   const [encounters, setEncounters] = useState<Encounter[]>([]);
   const [stickers, setStickers] = useState<Sticker[]>([]);
+  const [lookbookItems, setLookbookItems] = useState<LookbookItem[]>([]);
   const [specialDates, setSpecialDates] = useState<SpecialDate[]>([]);
   const [loveMessages, setLoveMessages] = useState<LoveMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -150,6 +152,30 @@ export default function App() {
       setStickers(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "stickers");
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Firestore real-time sync for Lookbook Items (Samu look, Ile look, Place)
+  useEffect(() => {
+    const q = query(collection(db, "lookbook_items"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: LookbookItem[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          category: data.category || "samu_look",
+          url: data.url || "",
+          title: data.title || "",
+          uploadedBy: data.uploadedBy || "",
+          createdAt: data.createdAt || "",
+        });
+      });
+      setLookbookItems(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "lookbook_items");
     });
 
     return () => unsubscribe();
@@ -281,16 +307,25 @@ export default function App() {
           <EncounterList
             encounters={encounters}
             stickers={stickers}
+            lookbookItems={lookbookItems}
             onDelete={handleDeleteEncounter}
             onEdit={(encounter) => {
               setEncounterToEdit(encounter);
               setIsAddModalOpen(true);
             }}
             currentUser={currentUser}
+            onNavigateToLookbook={() => setActiveTab("lookbook")}
           />
         );
       case "gallery":
         return <PhotoGallery encounters={encounters} currentUser={currentUser} />;
+      case "lookbook":
+        return (
+          <LookbookView
+            lookbookItems={lookbookItems}
+            currentUser={currentUser}
+          />
+        );
       case "calendar":
         return (
           <CalendarView
