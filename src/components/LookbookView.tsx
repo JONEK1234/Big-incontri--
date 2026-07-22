@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { LookbookItem } from "../types";
 import {
   Plus,
@@ -14,9 +15,13 @@ import {
   Check,
   Smile,
   X,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { collection, addDoc, deleteDoc, doc } from "firebase/firestore";
+import { compressImage } from "../utils/imageCompressor";
+import { uploadImageToStorage } from "../utils/imageUploader";
 
 interface LookbookViewProps {
   lookbookItems: LookbookItem[];
@@ -25,6 +30,12 @@ interface LookbookViewProps {
 
 type CategoryType = "samu_look" | "ile_look" | "place";
 
+interface PreviewFile {
+  id: string;
+  file?: File;
+  url: string;
+}
+
 export default function LookbookView({
   lookbookItems,
   currentUser,
@@ -32,78 +43,122 @@ export default function LookbookView({
   const [activeTab, setActiveTab] = useState<CategoryType>("samu_look");
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewItems, setPreviewItems] = useState<PreviewFile[]>([]);
   const [uploadedBy, setUploadedBy] = useState<string>(currentUser);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatusText, setUploadStatusText] = useState("");
   const [itemToDelete, setItemToDelete] = useState<LookbookItem | null>(null);
   const [addedStickerSuccessId, setAddedStickerSuccessId] = useState<string | null>(null);
 
-  // Lightbox state
+  // Fullscreen Lightbox state
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchEndX, setTouchEndX] = useState<number | null>(null);
 
   // Filter items for current category
   const filteredItems = lookbookItems.filter(
     (item) => item.category === activeTab
   );
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        setPreviewUrl(evt.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+  // Handle multiple files selection
+  const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const filesArr = Array.from(e.target.files) as File[];
+
+      filesArr.forEach((file: File) => {
+        const reader = new FileReader();
+        const id = Math.random().toString(36).substring(2, 9);
+        reader.onload = (evt) => {
+          if (evt.target?.result) {
+            setPreviewItems((prev) => [
+              ...prev,
+              { id, file, url: evt.target?.result as string },
+            ]);
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+
+      // Reset file input so user can pick same or more files if needed
+      e.target.value = "";
     }
   };
 
-  const handleSaveItem = async (e: React.FormEvent) => {
+  const removePreview = (idToRemove: string) => {
+    setPreviewItems((prev) => prev.filter((item) => item.id !== idToRemove));
+  };
+
+  // Save multiple look/place items to Firestore
+  const handleSaveItems = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile && !previewUrl) {
-      alert("Seleziona una foto prima di salvare!");
+    if (previewItems.length === 0) {
+      alert("Seleziona almeno una foto prima di salvare!");
       return;
     }
 
     setIsUploading(true);
+    let successCount = 0;
 
     try {
-      let imageDataUrl = previewUrl;
+      for (let i = 0; i < previewItems.length; i++) {
+        const preview = previewItems[i];
+        setUploadStatusText(
+          `Caricamento foto ${i + 1} di ${previewItems.length}...`
+        );
 
-      if (!imageDataUrl && selectedFile) {
-        imageDataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.readAsDataURL(selectedFile);
-          reader.onload = (evt) => resolve(evt.target?.result as string);
-          reader.onerror = (err) => reject(err);
-        });
+        let finalUrl = preview.url;
+
+        // If file exists, compress and try uploading to cloud storage
+        if (preview.file) {
+          try {
+            const compressedDataUrl = await compressImage(
+              preview.file,
+              1200,
+              1200,
+              0.75
+            );
+            const cloudUrl = await uploadImageToStorage(
+              compressedDataUrl,
+              `lookbook/${activeTab}_${Date.now()}_${i}.jpg`
+            );
+            if (cloudUrl) {
+              finalUrl = cloudUrl;
+            } else {
+              finalUrl = compressedDataUrl;
+            }
+          } catch (err) {
+            console.warn("Using compressed data URL fallback:", err);
+          }
+        }
+
+        const docData: Record<string, any> = {
+          category: activeTab,
+          url: finalUrl,
+          uploadedBy: uploadedBy || currentUser,
+          createdAt: new Date().toISOString(),
+        };
+
+        const trimmedTitle = newTitle.trim();
+        if (trimmedTitle) {
+          docData.title = trimmedTitle;
+        }
+
+        // Save doc to Firestore
+        await addDoc(collection(db, "lookbook_items"), docData);
+
+        successCount++;
       }
 
-      if (!imageDataUrl) {
-        throw new Error("Impossibile caricare l'immagine");
-      }
-
-      // Save to Firestore
-      await addDoc(collection(db, "lookbook_items"), {
-        category: activeTab,
-        url: imageDataUrl,
-        title: newTitle.trim() || undefined,
-        uploadedBy: uploadedBy || currentUser,
-        createdAt: new Date().toISOString(),
-      });
-
-      // Reset form
+      // Reset form after all photos saved
       setNewTitle("");
-      setSelectedFile(null);
-      setPreviewUrl(null);
+      setPreviewItems([]);
       setIsAddFormOpen(false);
     } catch (error) {
-      console.error("Error saving lookbook item:", error);
+      console.error("Error saving lookbook items:", error);
       handleFirestoreError(error, OperationType.WRITE, "lookbook_items");
     } finally {
       setIsUploading(false);
+      setUploadStatusText("");
     }
   };
 
@@ -111,9 +166,21 @@ export default function LookbookView({
     try {
       await deleteDoc(doc(db, "lookbook_items", item.id));
       setItemToDelete(null);
+
+      // Close lightbox if the deleted item was currently open
+      if (
+        lightboxIndex !== null &&
+        filteredItems[lightboxIndex]?.id === item.id
+      ) {
+        setLightboxIndex(null);
+      }
     } catch (error) {
       console.error("Error deleting lookbook item:", error);
-      handleFirestoreError(error, OperationType.DELETE, `lookbook_items/${item.id}`);
+      handleFirestoreError(
+        error,
+        OperationType.DELETE,
+        `lookbook_items/${item.id}`
+      );
     }
   };
 
@@ -128,7 +195,9 @@ export default function LookbookView({
 
       await addDoc(collection(db, "stickers"), {
         url: item.url,
-        title: item.title ? `${categoryLabel}: ${item.title}` : `Adesivo ${categoryLabel}`,
+        title: item.title
+          ? `${categoryLabel}: ${item.title}`
+          : `Adesivo ${categoryLabel}`,
         uploadedBy: currentUser,
         associatedMeetingIds: [],
         createdAt: new Date().toISOString(),
@@ -142,7 +211,7 @@ export default function LookbookView({
     }
   };
 
-  // Lightbox navigation
+  // Lightbox Navigation
   const openLightbox = (index: number) => {
     setLightboxIndex(index);
   };
@@ -161,13 +230,18 @@ export default function LookbookView({
     }
   };
 
+  // Touch Swipe handlers for Lightbox
   const handleTouchStart = (e: React.TouchEvent) => {
-    setTouchStartX(e.touches[0].clientX);
+    setTouchStartX(e.targetTouches[0].clientX);
+    setTouchEndX(null);
   };
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX === null) return;
-    const touchEndX = e.changedTouches[0].clientX;
+  const handleTouchMove = (e: React.TouchEvent) => {
+    setTouchEndX(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartX === null || touchEndX === null) return;
     const diff = touchStartX - touchEndX;
     if (diff > 50) {
       nextLightbox();
@@ -175,7 +249,20 @@ export default function LookbookView({
       prevLightbox();
     }
     setTouchStartX(null);
+    setTouchEndX(null);
   };
+
+  // Keyboard navigation for Lightbox
+  useEffect(() => {
+    if (lightboxIndex === null) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") nextLightbox();
+      if (e.key === "ArrowLeft") prevLightbox();
+      if (e.key === "Escape") setLightboxIndex(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [lightboxIndex, filteredItems]);
 
   const categories = [
     {
@@ -205,11 +292,11 @@ export default function LookbookView({
   ];
 
   return (
-    <div className="space-y-5 animate-in fade-in duration-200">
-      {/* 1. View Header Banner */}
+    <div className="space-y-5 animate-in fade-in duration-200 pb-12">
+      {/* 1. Header Banner */}
       <div className="bg-white rounded-3xl border border-brand-100 p-5 shadow-sm space-y-3 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-amber-200/30 to-orange-200/20 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
-        
+
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white shadow-md">
             <Sparkles className="w-5 h-5" />
@@ -260,7 +347,7 @@ export default function LookbookView({
         </div>
       </div>
 
-      {/* 2. Add New Photo Button / Form */}
+      {/* 2. Add New Photos Form or Trigger Button */}
       {!isAddFormOpen ? (
         <button
           onClick={() => setIsAddFormOpen(true)}
@@ -278,15 +365,14 @@ export default function LookbookView({
         </button>
       ) : (
         <form
-          onSubmit={handleSaveItem}
+          onSubmit={handleSaveItems}
           className="bg-white border border-brand-100 p-5 rounded-3xl space-y-4 relative shadow-sm animate-in fade-in duration-200"
         >
           <button
             type="button"
             onClick={() => {
               setIsAddFormOpen(false);
-              setPreviewUrl(null);
-              setSelectedFile(null);
+              setPreviewItems([]);
               setNewTitle("");
             }}
             className="absolute top-4 right-4 p-1 rounded-full bg-neutral-100 hover:bg-neutral-200 text-neutral-600 cursor-pointer transition"
@@ -297,7 +383,7 @@ export default function LookbookView({
           <div className="flex items-center gap-2 text-neutral-900">
             <Upload className="w-4 h-4 text-amber-600" />
             <h4 className="text-xs font-black uppercase tracking-wider">
-              Nuova Foto per{" "}
+              Aggiungi Foto in{" "}
               {activeTab === "samu_look"
                 ? "Samu look 👔"
                 : activeTab === "ile_look"
@@ -306,10 +392,10 @@ export default function LookbookView({
             </h4>
           </div>
 
-          {/* Title input */}
+          {/* Title Input (Strictly Optional) */}
           <div>
             <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1">
-              Titolo / Nome Outfit o Posto (Opzionale)
+              Titolo / Descrizione (Opzionale)
             </label>
             <input
               type="text"
@@ -320,13 +406,13 @@ export default function LookbookView({
                   ? "Es: Giacca elegante grigia"
                   : activeTab === "ile_look"
                   ? "Es: Abito floreale primaverile"
-                  : "Es: Caffè al centro storico"
+                  : "Es: Il nostro bar preferito"
               }
               className="w-full text-xs p-3 bg-brand-50/50 rounded-2xl border border-brand-100 focus:outline-none focus:ring-2 focus:ring-amber-500 text-neutral-800"
             />
           </div>
 
-          {/* Author Selector */}
+          {/* UploadedBy Selector */}
           <div>
             <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1">
               Caricato da
@@ -351,67 +437,96 @@ export default function LookbookView({
             </div>
           </div>
 
-          {/* Photo Input & Preview */}
+          {/* Multi-Photo Input & Previews */}
           <div>
-            <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1">
-              Seleziona Foto (Qualità Originale)
-            </label>
-            {previewUrl ? (
-              <div className="relative aspect-video rounded-2xl overflow-hidden bg-black/5 border border-neutral-200">
-                <img
-                  src={previewUrl}
-                  alt="Anteprima"
-                  className="w-full h-full object-contain"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewUrl(null);
-                    setSelectedFile(null);
-                  }}
-                  className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-black cursor-pointer transition"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50/50 hover:bg-amber-100/50 cursor-pointer transition text-center group">
-                <Upload className="w-6 h-6 text-amber-500 mb-2 group-hover:scale-110 transition" />
-                <span className="text-xs font-bold text-amber-900">
-                  Sfoglia o scatta foto
-                </span>
-                <span className="text-[9px] text-amber-600 mt-0.5 font-medium">
-                  Formati supportati: JPG, PNG, WEBP
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
+                Seleziona Foto (Supporta invio multiplo)
               </label>
+              {previewItems.length > 0 && (
+                <span className="text-[10px] font-bold text-amber-600">
+                  {previewItems.length}{" "}
+                  {previewItems.length === 1
+                    ? "foto selezionata"
+                    : "foto selezionate"}
+                </span>
+              )}
+            </div>
+
+            {/* Previews grid */}
+            {previewItems.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {previewItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="relative aspect-square rounded-2xl overflow-hidden bg-neutral-100 border border-neutral-200 group"
+                  >
+                    <img
+                      src={item.url}
+                      alt="Anteprima"
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removePreview(item.id)}
+                      className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white hover:bg-black transition cursor-pointer"
+                      aria-label="Rimuovi foto"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
+
+            {/* File upload drop zone */}
+            <label className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50/50 hover:bg-amber-100/50 cursor-pointer transition text-center group">
+              <Upload className="w-6 h-6 text-amber-500 mb-2 group-hover:scale-110 transition" />
+              <span className="text-xs font-bold text-amber-900">
+                Sfoglia o scatta una o più foto
+              </span>
+              <span className="text-[9px] text-amber-600 mt-0.5 font-medium">
+                Puoi selezionare più immagini contemporaneamente 📸
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFilesChange}
+                className="hidden"
+              />
+            </label>
           </div>
 
-          {/* Form submit button */}
+          {/* Submit Button */}
           <button
             type="submit"
-            disabled={isUploading || !previewUrl}
-            className="w-full py-3 bg-neutral-900 hover:bg-black text-white rounded-2xl text-xs font-bold disabled:opacity-50 transition cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+            disabled={isUploading || previewItems.length === 0}
+            className="w-full py-3.5 bg-neutral-900 hover:bg-black text-white rounded-2xl text-xs font-bold disabled:opacity-50 transition cursor-pointer flex items-center justify-center gap-2 shadow-md"
           >
             {isUploading ? (
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>{uploadStatusText || "Salvataggio..."}</span>
+              </div>
             ) : (
               <>
-                <Check className="w-4 h-4" />
-                <span>Salva Foto in {activeTab === "samu_look" ? "Samu look" : activeTab === "ile_look" ? "Ile look" : "Place"}</span>
+                <Check className="w-4 h-4 text-emerald-400" />
+                <span>
+                  Salva {previewItems.length > 1 ? `${previewItems.length} Foto` : "Foto"} in{" "}
+                  {activeTab === "samu_look"
+                    ? "Samu look"
+                    : activeTab === "ile_look"
+                    ? "Ile look"
+                    : "Place"}
+                </span>
               </>
             )}
           </button>
         </form>
       )}
 
-      {/* 3. Grid of Items */}
+      {/* 3. Items Grid */}
       {filteredItems.length === 0 ? (
         <div className="py-12 text-center bg-white rounded-3xl border border-brand-100 px-4 shadow-sm space-y-2">
           <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 mx-auto flex items-center justify-center mb-1">
@@ -431,13 +546,13 @@ export default function LookbookView({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
           {filteredItems.map((item, idx) => (
             <div
               key={item.id}
               className="group relative bg-white border border-brand-100 rounded-3xl overflow-hidden shadow-xs hover:shadow-md transition duration-200 flex flex-col"
             >
-              {/* Photo container */}
+              {/* Image Thumbnail - Click opens Fullscreen Lightbox */}
               <div
                 onClick={() => openLightbox(idx)}
                 className="aspect-square w-full bg-slate-900/5 relative cursor-pointer overflow-hidden"
@@ -447,13 +562,13 @@ export default function LookbookView({
                   alt={item.title || "Look or Place"}
                   className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                 />
-                
-                {/* Fullscreen Overlay */}
+
+                {/* Hover overlay hint */}
                 <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition duration-200 flex items-center justify-center">
                   <Eye className="w-6 h-6 text-white drop-shadow-md" />
                 </div>
 
-                {/* Author badge */}
+                {/* Author Badge */}
                 <span
                   className={`absolute top-2.5 left-2.5 text-[9px] font-black px-2.5 py-0.5 rounded-full shadow-xs backdrop-blur-md ${
                     item.uploadedBy === "Samuel"
@@ -465,10 +580,13 @@ export default function LookbookView({
                 </span>
               </div>
 
-              {/* Info & Action Footer */}
+              {/* Info & Action Controls */}
               <div className="p-3 flex-1 flex flex-col justify-between gap-1.5 bg-white">
                 {item.title ? (
-                  <p className="text-[11px] font-extrabold text-brand-950 truncate" title={item.title}>
+                  <p
+                    className="text-[11px] font-extrabold text-brand-950 truncate"
+                    title={item.title}
+                  >
                     {item.title}
                   </p>
                 ) : (
@@ -478,7 +596,7 @@ export default function LookbookView({
                 )}
 
                 <div className="flex items-center gap-1.5 pt-1.5 border-t border-brand-100/60">
-                  {/* Create sticker button */}
+                  {/* Create Sticker button */}
                   <button
                     type="button"
                     onClick={() => handleCreateSticker(item)}
@@ -514,7 +632,7 @@ export default function LookbookView({
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
+      {/* 4. Delete Confirmation Modal */}
       {itemToDelete && (
         <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-3xl p-5 max-w-xs w-full shadow-2xl text-center space-y-4">
@@ -526,7 +644,7 @@ export default function LookbookView({
                 Eliminare questa foto?
               </h4>
               <p className="text-xs text-neutral-500 mt-1 font-medium">
-                L'operazione non può essere annullata.
+                L'operazione rimuoverà la foto dal Lookbook.
               </p>
             </div>
             <div className="flex gap-2">
@@ -549,81 +667,145 @@ export default function LookbookView({
         </div>
       )}
 
-      {/* Fullscreen Lightbox for Lookbook Photos */}
-      {lightboxIndex !== null && filteredItems[lightboxIndex] && (
-        <div
-          className="fixed inset-0 z-70 bg-black/95 backdrop-blur-md flex flex-col justify-between animate-in fade-in duration-200"
-          onClick={() => setLightboxIndex(null)}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
-          {/* Lightbox Header */}
-          <div className="p-4 flex items-center justify-between text-white z-50">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black uppercase tracking-wider bg-white/20 px-3 py-1 rounded-full border border-white/10">
-                {activeTab === "samu_look"
-                  ? "Samu look"
-                  : activeTab === "ile_look"
-                  ? "Ile look"
-                  : "Place"}
-              </span>
-              <span className="text-xs text-white/60 font-medium">
-                {lightboxIndex + 1} / {filteredItems.length}
-              </span>
+      {/* 5. Fullscreen Lightbox - Rendered via Portal for exact match with photos and stickers */}
+      {lightboxIndex !== null &&
+        filteredItems[lightboxIndex] &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-md flex flex-col justify-between animate-in fade-in duration-200 select-none"
+            onClick={() => setLightboxIndex(null)}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            {/* Lightbox Header */}
+            <div className="p-4 flex items-center justify-between text-white z-50">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider bg-white/20 px-3 py-1 rounded-full border border-white/10">
+                  {activeTab === "samu_look"
+                    ? "Samu look"
+                    : activeTab === "ile_look"
+                    ? "Ile look"
+                    : "Place"}
+                </span>
+                <span className="text-xs text-white/70 font-medium">
+                  {lightboxIndex + 1} / {filteredItems.length}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Delete button from Lightbox */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setItemToDelete(filteredItems[lightboxIndex]);
+                  }}
+                  className="p-2 rounded-full bg-rose-500/20 hover:bg-rose-600 text-rose-200 transition cursor-pointer"
+                  title="Elimina Foto"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+
+                {/* Close Lightbox button */}
+                <button
+                  onClick={() => setLightboxIndex(null)}
+                  className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                  title="Chiudi"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => setLightboxIndex(null)}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
 
-          {/* Lightbox Image View */}
-          <div className="flex-1 relative flex items-center justify-center p-2 sm:p-6 overflow-hidden">
-            {filteredItems.length > 1 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  prevLightbox();
-                }}
-                className="absolute left-2 sm:left-4 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/90 border border-white/20 transition cursor-pointer"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-            )}
+            {/* Lightbox Main Image View */}
+            <div className="flex-1 relative flex items-center justify-center p-2 sm:p-6 overflow-hidden">
+              {filteredItems.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    prevLightbox();
+                  }}
+                  className="absolute left-2 sm:left-4 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/90 border border-white/20 transition cursor-pointer"
+                  title="Foto precedente"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+              )}
 
-            <img
-              src={filteredItems[lightboxIndex].url}
-              alt={filteredItems[lightboxIndex].title || "Lookbook Image"}
-              className="max-h-full max-w-full object-contain select-none rounded-lg shadow-2xl"
+              <img
+                src={filteredItems[lightboxIndex].url}
+                alt={filteredItems[lightboxIndex].title || "Lookbook Image"}
+                className="max-h-full max-w-full object-contain select-none rounded-2xl shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+
+              {filteredItems.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    nextLightbox();
+                  }}
+                  className="absolute right-2 sm:right-4 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/90 border border-white/20 transition cursor-pointer"
+                  title="Foto successiva"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              )}
+            </div>
+
+            {/* Lightbox Bottom Action Bar */}
+            <div
+              className="p-4 bg-gradient-to-t from-black via-black/80 to-transparent text-center z-50 flex flex-col items-center gap-3"
               onClick={(e) => e.stopPropagation()}
-            />
+            >
+              <div>
+                <p className="text-white text-sm font-black">
+                  {filteredItems[lightboxIndex].title || "Foto senza titolo"}
+                </p>
+                <p className="text-[10px] text-white/70 font-medium mt-0.5">
+                  Caricato da {filteredItems[lightboxIndex].uploadedBy}
+                </p>
+              </div>
 
-            {filteredItems.length > 1 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  nextLightbox();
-                }}
-                className="absolute right-2 sm:right-4 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/90 border border-white/20 transition cursor-pointer"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            )}
-          </div>
+              <div className="flex items-center gap-3">
+                {/* Create Sticker button from Lightbox */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCreateSticker(filteredItems[lightboxIndex])
+                  }
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition cursor-pointer active:scale-95"
+                >
+                  {addedStickerSuccessId === filteredItems[lightboxIndex].id ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Sticker Creato!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Smile className="w-4 h-4" />
+                      <span>Crea Sticker</span>
+                    </>
+                  )}
+                </button>
 
-          {/* Lightbox Footer Title */}
-          <div className="p-4 bg-gradient-to-t from-black via-black/80 to-transparent text-center z-50">
-            <p className="text-white text-sm font-extrabold">
-              {filteredItems[lightboxIndex].title || "Foto senza titolo"}
-            </p>
-            <p className="text-[10px] text-white/60 font-medium mt-0.5">
-              Caricato da {filteredItems[lightboxIndex].uploadedBy}
-            </p>
-          </div>
-        </div>
-      )}
+                {/* Download / Open Original */}
+                <a
+                  href={filteredItems[lightboxIndex].url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download="lookbook-photo.jpg"
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                  title="Apri originale / Scarica"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
